@@ -44,13 +44,24 @@ class ExperimentDataCollector:
             }
         }
         
-    def set_config(self, args):
-        """设置实验配置"""
+    def set_config(self, args, enable_defense=None):
+        """
+        设置实验配置
+        
+        Args:
+            args: 命令行参数
+            enable_defense: 实际的防御状态（优先级高于args）
+                - None: 从args读取
+                - True/False: 使用传入的值
+        """
+        # 优先使用传入的enable_defense，否则从args读取
+        actual_enable_defense = enable_defense if enable_defense is not None else getattr(args, 'enable_defense', 1)
+        
         self.data['experiment_info']['config'] = {
             # 基本训练参数
             'algorithm': getattr(args, 'algorithm', 'FlexFL_WithAttack'),
             'attack_scenario': getattr(args, 'attack_scenario', 'no_attack'),
-            'enable_defense': getattr(args, 'enable_defense', 1),
+            'enable_defense': actual_enable_defense,
             'epochs': getattr(args, 'epochs', 80),
             'num_users': getattr(args, 'num_users', 100),
             'frac': getattr(args, 'frac', 0.1),
@@ -218,12 +229,19 @@ class ExperimentDataCollector:
 # 全局数据收集器实例
 experiment_collector = ExperimentDataCollector()
 
-def initialize_data_collector(args, experiment_name=None):
-    """初始化数据收集器"""
+def initialize_data_collector(args, experiment_name=None, enable_defense=None):
+    """
+    初始化数据收集器
+    
+    Args:
+        args: 命令行参数
+        experiment_name: 实验名称（可选）
+        enable_defense: 实际的防御状态（可选，优先级高于args）
+    """
     global experiment_collector
     if experiment_name:
         experiment_collector = ExperimentDataCollector(experiment_name)
-    experiment_collector.set_config(args)
+    experiment_collector.set_config(args, enable_defense=enable_defense)
     return experiment_collector
 
 def collect_round_data(round_num, acc_dict, loss_dict=None):

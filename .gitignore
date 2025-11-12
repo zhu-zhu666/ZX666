@@ -205,3 +205,66 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ==================== 项目特定忽略 ====================
+
+# 数据集文件（太大，不提交）
+data/mnist/
+data/cifar/
+data/cifar10/
+data/cifar100/
+data/imagenet/
+data/FEMNIST/
+data/shakespeare/
+data/*.pt
+data/*.pth
+data/*.h5
+data/*.hdf5
+data/*.npz
+data/*.npy
+
+# 保留数据集配置文件（小文件，需要提交）
+!data/*.json
+!data/README.md
+
+# 实验结果文件（太大，不提交）
+results/
+independent_test_*.json
+*.json
+!data/*.json
+!cluster_mappings/*.json
+
+# 模型检查点和权重（太大，不提交）
+checkpoints/
+saved_models/
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# 训练日志
+logs/
+*.log
+*.txt
+!requirements.txt
+!README.txt
+
+# 临时文件和缓存
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# WandB日志
+wandb/
+
+# TensorBoard日志
+runs/
+tensorboard/
+
+# GPU相关
+*.cuda
+*.cudnn

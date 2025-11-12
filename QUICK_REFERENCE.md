@@ -17,6 +17,8 @@ MODEL=resnet20 DATASET=fmnist ./run_independent_detector_test.sh
 
 ### 攻击类型切换
 
+### 数据投毒攻击（Data Poisoning）
+
 ```bash
 # 标签翻转攻击（默认）
 ATTACK_TYPE=label_flipping ./run_independent_detector_test.sh
@@ -26,6 +28,13 @@ ATTACK_TYPE=noise_injection ./run_independent_detector_test.sh
 
 # 无攻击模式
 ATTACK_TYPE=no_attack ./run_independent_detector_test.sh
+```
+
+### 模型投毒攻击（Model Poisoning - 论文实现）🆕
+
+```bash
+# PoisonedFL攻击（论文核心实现 - 多轮一致性模型投毒）
+ATTACK_TYPE=poisonedfl ./run_independent_detector_test.sh
 ```
 
 ### 数据分布切换

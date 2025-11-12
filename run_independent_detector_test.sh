@@ -42,8 +42,14 @@ fi
 
 # ============ 攻击类型设置（可切换） ============
 # 可选值: 
+#   数据投毒攻击（Data Poisoning）:
 #   - label_flipping: 标签翻转攻击（100%翻转率）
 #   - noise_injection: 噪声注入攻击（100%加噪率）
+#   
+#   模型投毒攻击（Model Poisoning）:
+#   - poisonedfl: PoisonedFL攻击（论文实现 - 多轮一致性模型投毒）
+#   
+#   基线:
 #   - no_attack: 无攻击
 ATTACK_TYPE="${ATTACK_TYPE:-label_flipping}"  # 默认使用标签翻转
 # ===============================================
@@ -169,8 +175,8 @@ if [ "$DATA_DISTRIBUTION" = "noniid" ]; then
 fi
 
 # 检查Python环境
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python3 未安装"
+if ! command -v python &> /dev/null; then
+    echo "❌ Python 未安装"
     exit 1
 fi
 
@@ -207,7 +213,7 @@ if [ "${DEBUG_ENV:-0}" = "1" ]; then
     echo ""
 fi
 
-python3 test_independent_detectors_training.py \
+python test_independent_detectors_training.py \
     --dataset $DATASET \
     --model $MODEL \
     --num_users $NUM_USERS \
@@ -244,9 +250,15 @@ echo "   组合示例 (ResNet20 + Fashion-MNIST + 标签翻转攻击):"
 echo "     MODEL=resnet20 DATASET=fmnist ATTACK_TYPE=label_flipping ./run_independent_detector_test.sh"
 echo ""
 echo "💡 切换攻击类型:"
-echo "   标签翻转: ATTACK_TYPE=label_flipping ./run_independent_detector_test.sh"
-echo "   噪声注入: ATTACK_TYPE=noise_injection ./run_independent_detector_test.sh"
-echo "   无攻击:   ATTACK_TYPE=no_attack ./run_independent_detector_test.sh"
+echo "   数据投毒攻击:"
+echo "     标签翻转: ATTACK_TYPE=label_flipping ./run_independent_detector_test.sh"
+echo "     噪声注入: ATTACK_TYPE=noise_injection ./run_independent_detector_test.sh"
+echo ""
+echo "   模型投毒攻击（论文实现）:"
+echo "     PoisonedFL:      ATTACK_TYPE=poisonedfl ./run_independent_detector_test.sh"
+echo ""
+echo "   基线:"
+echo "     无攻击:   ATTACK_TYPE=no_attack ./run_independent_detector_test.sh"
 echo ""
 echo "💡 切换数据分布:"
 echo "   IID:      DATA_DISTRIBUTION=iid ./run_independent_detector_test.sh"

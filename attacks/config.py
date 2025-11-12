@@ -60,10 +60,27 @@ EXTREME_ATTACK_CONFIG = {
     'attack_timing': 'all_rounds'
 }
 
+# ============ 模型投毒攻击配置 ============
+
+# PoisonedFL攻击配置（论文实现）
+POISONEDFL_CONFIG = {
+    'malicious_ratio': 0.5,  # 50%的客户端为恶意
+    'attack_type': 'poisonedfl',
+    'attack_params': {
+        'args': None,  # 需要在运行时设置
+        'device': None,  # 自动检测
+        'attack_strength': 1.0,  # 攻击强度λ（缩放因子）
+        'consistency_weight': 0.5,  # 保留参数（兼容性，PoisonedFL不使用）
+    },
+    'attack_timing': 'all_rounds'
+}
+
 ATTACK_SCENARIOS = {
     'no_attack': NO_ATTACK_CONFIG,
     'label_flipping': LABEL_FLIPPING_CONFIG,
     'noise_injection': NOISE_INJECTION_CONFIG,
     'backdoor': BACKDOOR_CONFIG,
-    'extreme_attack': EXTREME_ATTACK_CONFIG  # 新增极端攻击
+    'extreme_attack': EXTREME_ATTACK_CONFIG,
+    # 模型投毒攻击（论文实现）
+    'poisonedfl': POISONEDFL_CONFIG,
 }

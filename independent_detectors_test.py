@@ -896,9 +896,13 @@ class IndependentDetectorsTester:
         for key, value in vars(self.args).items():
             args_dict[key] = self._convert_to_json_serializable(value)
         
-        # 🔧 修复：如果有攻击配置，更新args中的attack_scenario
-        if attack_config and 'attack_type' in attack_config:
-            args_dict['attack_scenario'] = attack_config['attack_type']
+        # 🔧 修复：如果有攻击配置，更新args中的相关字段
+        if attack_config:
+            if 'attack_type' in attack_config:
+                args_dict['attack_scenario'] = attack_config['attack_type']
+            # 🔧 修复Bug：使用attack_config中的实际enable_defense值（而不是args默认值）
+            if 'enable_defense' in attack_config:
+                args_dict['enable_defense'] = 1 if attack_config['enable_defense'] else 0
         
         # 转换所有数据为可序列化格式
         output = {

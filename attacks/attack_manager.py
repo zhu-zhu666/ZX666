@@ -1,7 +1,9 @@
 import random
-from typing import Dict, Any, List, Set, Tuple
+from typing import Dict, Any, List, Set, Tuple, Optional
+import torch
 
 from .data_poisoning import LabelFlippingAttack, NoiseInjectionAttack, BackdoorAttack
+from .model_poisoning import PoisonedFLAttack
 
 
 class AttackManager:
@@ -17,7 +19,9 @@ class AttackManager:
         self.attack_summary: Dict[int, Dict[str, Any]] = {}
 
         # 初始化对应攻击实例
-        self.attack_instance = None
+        self.attack_instance = None  # 数据投毒实例
+        self.model_attack_instance = None  # 模型投毒实例
+        self.attack_category = 'data'  # 'data' 或 'model'
         if self.attack_type == 'label_flipping':
             self.attack_instance = LabelFlippingAttack(
                 poison_rate=self.attack_params.get('poison_rate', 0.5),
@@ -34,6 +38,17 @@ class AttackManager:
                 poison_rate=self.attack_params.get('poison_rate', 0.1),
                 trigger_size=self.attack_params.get('trigger_size', 3),
                 target_class=self.attack_params.get('target_class', 0),
+            )
+        # 模型投毒攻击 (PoisonedFL)
+        elif self.attack_type == 'poisonedfl':
+            self.attack_category = 'model'
+            args = self.attack_params.get('args')  # 需要传入args参数
+            device = self.attack_params.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+            self.model_attack_instance = PoisonedFLAttack(
+                args=args,
+                device=device,
+                attack_strength=self.attack_params.get('attack_strength', 1.0),
+                consistency_weight=self.attack_params.get('consistency_weight', 0.5),
             )
 
     def setup_malicious_clients(self, participating_clients: List[int], current_round: int, total_rounds: int) -> None:
@@ -52,10 +67,46 @@ class AttackManager:
         return client_id in self.malicious_clients
 
     def poison_data(self, client_id, images, labels):
-        if not self.attack_instance or not self.is_malicious(client_id):
+        """数据投毒：在训练前修改数据"""
+        if self.attack_category != 'data' or not self.attack_instance or not self.is_malicious(client_id):
             return images, labels
         # 兼容 data_poisoning.py 的方法名 poison_data
         return self.attack_instance.poison_data(images, labels)
+    
+    def poison_model(self, client_id, client_model, global_model, round_idx, **kwargs):
+        """模型投毒：在训练后修改模型参数
+        
+        Args:
+            client_id: 客户端ID
+            client_model: 客户端训练后的模型
+            global_model: 当前全局模型
+            round_idx: 当前训练轮次
+            **kwargs: 额外参数（如detection_features）
+            
+        Returns:
+            poisoned_model: 经过恶意优化的模型（如果是恶意客户端）
+            client_model: 原始模型（如果不是恶意客户端）
+        """
+        if self.attack_category != 'model' or not self.model_attack_instance or not self.is_malicious(client_id):
+            return client_model
+        
+        # 调用模型投毒攻击
+        poisoned_model = self.model_attack_instance.craft_malicious_update(
+            client_model=client_model,
+            global_model=global_model,
+            round_idx=round_idx,
+            **kwargs
+        )
+        
+        return poisoned_model
+    
+    def is_model_poisoning(self) -> bool:
+        """判断是否是模型投毒攻击"""
+        return self.attack_category == 'model'
+    
+    def is_data_poisoning(self) -> bool:
+        """判断是否是数据投毒攻击"""
+        return self.attack_category == 'data'
 
     def get_malicious_clients(self) -> List[int]:
         return sorted(self.malicious_clients)

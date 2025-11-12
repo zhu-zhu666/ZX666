@@ -265,10 +265,10 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
     
     # 初始化攻击管理器
     if attack_scenario != 'no_attack':
-        # 根据不同的攻击类型配置参数
+        # 根据攻击场景设置参数
         if attack_scenario == 'label_flipping':
             attack_params = {
-                'poison_rate': 1.0,  # 100%翻转率（所有数据都翻转标签）
+                'poison_rate': 1.0,  # 100%翻转率（所有标签都翻转）
                 'num_classes': args.num_classes,
                 'flip_strategy': 'random'  # 随机翻转策略
             }
@@ -279,6 +279,15 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
                 'noise_std': 0.25  # 噪声标准差
             }
             attack_desc = f"噪声注入，加噪率=100%，噪声标准差={attack_params['noise_std']}"
+        elif attack_scenario == 'poisonedfl':
+            # PoisonedFL攻击（模型投毒 - 论文实现）
+            attack_params = {
+                'args': args,  # 传递训练参数
+                'device': args.device,
+                'attack_strength': 5.0,  # 攻击强度λ（缩放因子）- 增强以确保破坏效果
+                'consistency_weight': 0.5,  # 保留参数（兼容性）
+            }
+            attack_desc = f"PoisonedFL攻击（论文实现），λ={attack_params['attack_strength']}"
         else:
             raise ValueError(f"Unknown attack scenario: {attack_scenario}")
         
@@ -287,7 +296,8 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
             'malicious_ratio': args.num_corrupt / args.num_users,
             'attack_timing': 'all_rounds',  # 每轮都攻击
             'attack_start_round': 0,
-            'attack_params': attack_params
+            'attack_params': attack_params,
+            'enable_defense': enable_defense  # 🔧 修复：记录实际的防御状态
         }
         attack_manager = AttackManager(
             num_clients=args.num_users,
@@ -307,7 +317,8 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
             'malicious_ratio': 0,  # 实际不污染
             'attack_timing': 'test_only',  # 仅测试用
             'attack_start_round': 0,
-            'attack_params': attack_params
+            'attack_params': attack_params,
+            'enable_defense': enable_defense  # 🔧 修复：记录实际的防御状态
         }
         attack_manager = AttackManager(
             num_clients=args.num_users,
@@ -463,8 +474,47 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
                     print(f"  → 检测器工作中（direction_similarity检测）")
                 
                 attack_manager.malicious_clients = set(malicious_clients)
+        elif attack_scenario == 'poisonedfl':
+            # PoisonedFL攻击：暖机期10个良性，正常期20个（10良性+10恶意）
+            if round_idx < args.warmup_rounds:
+                # 暖机期：选择前10个客户端，全部良性
+                benign_clients = available_clients[:10]
+                malicious_clients = []
+                selected_clients = benign_clients
+                
+                print(f"选中客户端: {selected_clients}")
+                
+                # 显示客户端簇信息
+                if client_cluster_map:
+                    print(f"\n📊 选中客户端簇信息:")
+                    for client_id in selected_clients:
+                        cluster_info = get_client_cluster_info(client_id, client_cluster_map, cluster_summary)
+                        print(f"  {cluster_info}")
+                    print(f"  → 良性客户端（暖机期）: {benign_clients}")
+                    print(f"  → 前{args.warmup_rounds}轮warm-up，全部10个良性客户端聚合")
+                
+                attack_manager.malicious_clients = set()
+            else:
+                # 正常期：固定20个客户端，10个良性 + 10个恶意
+                selected_clients = available_clients[:20]
+                benign_clients = selected_clients[:10]  # 前10个是良性
+                malicious_clients = selected_clients[10:]  # 后10个是恶意
+                
+                print(f"选中客户端: {selected_clients}")
+                
+                # 显示客户端簇信息
+                if client_cluster_map:
+                    print(f"\n📊 选中客户端簇信息:")
+                    for client_id in selected_clients:
+                        cluster_info = get_client_cluster_info(client_id, client_cluster_map, cluster_summary)
+                        print(f"  {cluster_info}")
+                    print(f"  → 良性客户端: {benign_clients}")
+                    print(f"  → 恶意客户端: {malicious_clients}")
+                    print(f"  → 检测器工作中（PoisonedFL模型投毒攻击）")
+                
+                attack_manager.malicious_clients = set(malicious_clients)
         else:
-            # 其他攻击模式：正常选择m个客户端
+            # 其他未知攻击模式：正常选择m个客户端
             selected_clients = available_clients[:m]
             print(f"选中客户端: {selected_clients}")
             
@@ -513,6 +563,19 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
                 global_model=global_model if args.use_fedprox else None
             )
             external_model.load_state_dict(w_external)
+            
+            # 1.5. 模型投毒（如果是模型投毒攻击且客户端是恶意的）
+            # 注意：模型投毒发生在训练后，检测前
+            if attack_manager and attack_manager.is_model_poisoning():
+                # 应用模型投毒攻击
+                external_model = attack_manager.poison_model(
+                    client_id=user_idx,
+                    client_model=external_model,
+                    global_model=global_model,
+                    round_idx=round_idx
+                )
+                if attack_manager.is_malicious(user_idx):
+                    print(f"  [🔴 模型投毒] 客户端 {user_idx} 应用PoisonedFL攻击")
             
             # 2. TEE训练
             print("  [2/3] TEE训练中...")
@@ -619,8 +682,17 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
                     
                     # 单一检测器：仅使用direction_similarity
                     detected_as_malicious = direction_anomaly
+                elif attack_scenario == 'poisonedfl':
+                    # PoisonedFL模型投毒：使用专用阈值
+                    # 原理：模型投毒更隐蔽（多轮一致性优化），需要比数据投毒更宽松的阈值
+                    # ⚠️ 观察模式不改变阈值，只改变聚合决策
+                    direction_threshold = 0.15  # PoisonedFL专用阈值（统一使用）
+                                               # 介于label_flipping(0.1)和noise_injection(0.24)之间
+                    
+                    direction_anomaly = (direction_sim is not None and direction_sim < direction_threshold)
+                    detected_as_malicious = direction_anomaly
                 else:
-                    # 标签翻转：仅使用direction_similarity
+                    # 标签翻转等其他攻击：仅使用direction_similarity
                     # 🎚️ 阈值控制层：根据防御开关调整阈值
                     if enable_defense:
                         # 防御模式：统一阈值为0.1
@@ -668,8 +740,14 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
                     #             if shallow_mean is not None:
                     #                 print(f"       (浅层L1: {shallow_mean:.4f})")
                     print(f"     • 检测策略: 单一检测器（direction_similarity）")
+                elif attack_scenario == 'poisonedfl':
+                    # PoisonedFL模型投毒：显示专用阈值
+                    if direction_sim is not None:
+                        dir_status = "✓通过" if direction_sim >= direction_threshold else "✗异常"
+                        print(f"     • 更新方向相似度: {direction_sim:.4f}  (阈值: {direction_threshold:.2f})  {dir_status}")
+                    print(f"     • 检测策略: 模型投毒检测（PoisonedFL专用阈值）")
                 else:
-                    # 标签翻转：只显示direction_similarity
+                    # 标签翻转等其他攻击：只显示direction_similarity
                     if direction_sim is not None:
                         dir_status = "✓通过" if direction_sim >= direction_threshold_label else "✗异常"
                         print(f"     • 更新方向相似度: {direction_sim:.4f}  (阈值: {direction_threshold_label:.2f})  {dir_status}")
@@ -703,7 +781,10 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
             
             # 聚合模型（所有轮次都执行）
             if should_aggregate:
-                w_locals.append(copy.deepcopy(w_external))
+                # 🔧 关键修复：聚合投毒后的模型，不是训练后的模型
+                # 对于模型投毒攻击，external_model已经被poison_model修改
+                # 对于数据投毒攻击，external_model就是训练后的模型
+                w_locals.append(copy.deepcopy(external_model.state_dict()))
                 aggregated_clients.append(user_idx)
             
             # 清理内存
