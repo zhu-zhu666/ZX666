@@ -224,15 +224,18 @@ data/*.npz
 data/*.npy
 
 # 保留数据集配置文件（小文件，需要提交）
-!data/*.json
+# !data/*.json  # 注释掉，不提交data目录的json文件
 !data/README.md
 
 # 实验结果文件（太大，不提交）
 results/
 independent_test_*.json
 *.json
-!data/*.json
+# !data/*.json  # 注释掉，不提交data目录的json文件
 !cluster_mappings/*.json
+
+# 数据分布配置文件（不提交）
+data/*.json
 
 # 模型检查点和权重（太大，不提交）
 checkpoints/

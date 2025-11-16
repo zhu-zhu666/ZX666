@@ -45,7 +45,7 @@ def args_parser():
     parser.add_argument('--dataset', type=str, default='cifar10', help="name of dataset")
     parser.add_argument('--generate_data', type=int, default=1, help="whether generate new dataset")
     parser.add_argument('--iid', type=int, default=1, help='whether i.i.d or not')
-    parser.add_argument('--noniid_case', type=int, default=0, help="non i.i.d case (1, 2, 3, 4)")
+    parser.add_argument('--noniid_case', type=int, default=1, help="non i.i.d case (1, 2, 3, 4)")
     parser.add_argument('--data_beta', type=float, default=0.5,
                         help='The parameter for the dirichlet distribution for data partitioning')
     parser.add_argument('--use_clustered_data', type=int, default=0, 
@@ -117,6 +117,15 @@ def args_parser():
     # 检测器相关参数
     parser.add_argument('--warmup_rounds', type=int, default=3, 
                         help='Number of warm-up rounds before enabling malicious client detection')
+    
+    # 对比实验参数（用于test_defense_comparison.py）
+    parser.add_argument('--attack_type', type=str, default='none',
+                        choices=['none', 'poisonedfl', 'label_flipping', 'noise_injection', 'backdoor'],
+                        help='Attack type for comparison experiments')
+    parser.add_argument('--malicious_ratio', type=float, default=0.0,
+                        help='Ratio of malicious clients (0.0-1.0)')
+    parser.add_argument('--test_freq', type=int, default=1,
+                        help='Frequency of testing (every N epochs)')
 
     args = parser.parse_args()
     return args

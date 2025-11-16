@@ -115,6 +115,11 @@ class AttackManager:
         return self.attack_summary
 
     def _should_attack_in_round(self, current_round: int, total_rounds: int) -> bool:
+        # Warmup期：前3轮不攻击，让模型先收敛
+        warmup_rounds = 3
+        if current_round < warmup_rounds:
+            return False
+        
         if self.attack_timing == 'all_rounds':
             return True
         if self.attack_timing == 'last_round':
