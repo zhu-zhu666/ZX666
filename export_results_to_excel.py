@@ -26,13 +26,16 @@ def create_accuracy_comparison_sheet(wb, results):
     ws = wb.create_sheet("准确率对比", 0)
     
     # 标题
-    ws['A1'] = '防御方法对比实验 - 准确率'
+    ws['A1'] = '4方法对比实验 - 准确率'
     ws['A1'].font = Font(size=14, bold=True)
-    ws.merge_cells('A1:H1')
+    ws.merge_cells('A1:K1')
     
     # 表头
-    headers = ['轮次', 'TEE-FL准确率', 'TEE-FL损失', 'FLTrust准确率', 'FLTrust损失', 
-               'FedAvg准确率', 'FedAvg损失', '最佳方法']
+    headers = ['轮次', 'FedAvg-Clean\n(无攻击)', 'FedAvg-Clean\n损失', 
+               'TEE-FL\n准确率', 'TEE-FL\n损失', 
+               'FLTrust\n准确率', 'FLTrust\n损失', 
+               'FedAvg\n准确率', 'FedAvg\n损失', 
+               '最佳防御', '性能下降']
     for col, header in enumerate(headers, 1):
         cell = ws.cell(3, col, header)
         cell.font = Font(bold=True)
@@ -41,55 +44,81 @@ def create_accuracy_comparison_sheet(wb, results):
         cell.alignment = Alignment(horizontal='center')
     
     # 数据
-    max_epochs = max(len(results['tee_fl']['accuracies']), 
-                     len(results['fltrust']['accuracies']),
-                     len(results['fedavg']['accuracies']))
+    max_epochs = max(
+        len(results.get('fedavg_clean', {}).get('accuracies', [])),
+        len(results['tee_fl']['accuracies']), 
+        len(results['fltrust']['accuracies']),
+        len(results['fedavg']['accuracies'])
+    )
     
     for i in range(max_epochs):
         row = 4 + i
         ws.cell(row, 1, i+1)  # 轮次
         
+        # FedAvg-Clean (无攻击baseline)
+        baseline_acc = None
+        if 'fedavg_clean' in results and i < len(results['fedavg_clean']['accuracies']):
+            baseline_acc = results['fedavg_clean']['accuracies'][i]['accuracy']
+            baseline_loss = results['fedavg_clean']['accuracies'][i]['loss']
+            cell = ws.cell(row, 2, f"{baseline_acc:.2f}%")
+            cell.fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")  # 灰色背景
+            ws.cell(row, 3, f"{baseline_loss:.4f}")
+        
         # TEE-FL
+        tee_acc = None
         if i < len(results['tee_fl']['accuracies']):
             tee_acc = results['tee_fl']['accuracies'][i]['accuracy']
             tee_loss = results['tee_fl']['accuracies'][i]['loss']
-            ws.cell(row, 2, f"{tee_acc:.2f}%")
-            ws.cell(row, 3, f"{tee_loss:.4f}")
+            ws.cell(row, 4, f"{tee_acc:.2f}%")
+            ws.cell(row, 5, f"{tee_loss:.4f}")
         
         # FLTrust
+        flt_acc = None
         if i < len(results['fltrust']['accuracies']):
             flt_acc = results['fltrust']['accuracies'][i]['accuracy']
             flt_loss = results['fltrust']['accuracies'][i]['loss']
-            ws.cell(row, 4, f"{flt_acc:.2f}%")
-            ws.cell(row, 5, f"{flt_loss:.4f}")
+            ws.cell(row, 6, f"{flt_acc:.2f}%")
+            ws.cell(row, 7, f"{flt_loss:.4f}")
         
-        # FedAvg
+        # FedAvg (有攻击)
+        fed_acc = None
         if i < len(results['fedavg']['accuracies']):
             fed_acc = results['fedavg']['accuracies'][i]['accuracy']
             fed_loss = results['fedavg']['accuracies'][i]['loss']
-            ws.cell(row, 6, f"{fed_acc:.2f}%")
-            ws.cell(row, 7, f"{fed_loss:.4f}")
+            ws.cell(row, 8, f"{fed_acc:.2f}%")
+            ws.cell(row, 9, f"{fed_loss:.4f}")
         
-        # 最佳方法
+        # 最佳防御方法（排除baseline）
         accs = []
-        if i < len(results['tee_fl']['accuracies']):
+        if tee_acc is not None:
             accs.append(('TEE-FL', tee_acc))
-        if i < len(results['fltrust']['accuracies']):
+        if flt_acc is not None:
             accs.append(('FLTrust', flt_acc))
-        if i < len(results['fedavg']['accuracies']):
+        if fed_acc is not None:
             accs.append(('FedAvg', fed_acc))
         
         if accs:
             best = max(accs, key=lambda x: x[1])
-            cell = ws.cell(row, 8, best[0])
+            cell = ws.cell(row, 10, best[0])
             if best[0] == 'TEE-FL':
-                cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")  # 绿色
+            elif best[0] == 'FLTrust':
+                cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")  # 黄色
+        
+        # 性能下降（相对于baseline）
+        if baseline_acc is not None and best:
+            drop = baseline_acc - best[1]
+            drop_pct = (drop / baseline_acc) * 100
+            cell = ws.cell(row, 11, f"-{drop:.2f}% ({drop_pct:.1f}%)")
+            if drop_pct > 10:
+                cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")  # 红色
     
     # 调整列宽
     ws.column_dimensions['A'].width = 8
-    for col in ['B', 'C', 'D', 'E', 'F', 'G']:
-        ws.column_dimensions[col].width = 14
-    ws.column_dimensions['H'].width = 12
+    for col in ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']:
+        ws.column_dimensions[col].width = 12
+    ws.column_dimensions['J'].width = 12
+    ws.column_dimensions['K'].width = 18
 
 
 def create_summary_sheet(wb, results):
@@ -143,7 +172,12 @@ def create_summary_sheet(wb, results):
     
     # 计算统计数据
     methods_data = []
-    for method_name, method_key in [('TEE-FL', 'tee_fl'), ('FLTrust', 'fltrust'), ('FedAvg', 'fedavg')]:
+    for method_name, method_key in [
+        ('FedAvg-Clean(无攻击)', 'fedavg_clean'),
+        ('TEE-FL', 'tee_fl'), 
+        ('FLTrust', 'fltrust'), 
+        ('FedAvg(有攻击)', 'fedavg')
+    ]:
         if method_key in results:
             accs = [item['accuracy'] for item in results[method_key]['accuracies']]
             methods_data.append({
@@ -166,7 +200,12 @@ def create_summary_sheet(wb, results):
     row += 1
     ws.cell(row, 1, '训练时间').font = Font(bold=True, size=12)
     row += 1
-    for method_name, method_key in [('TEE-FL', 'tee_fl'), ('FLTrust', 'fltrust'), ('FedAvg', 'fedavg')]:
+    for method_name, method_key in [
+        ('FedAvg-Clean(无攻击)', 'fedavg_clean'),
+        ('TEE-FL', 'tee_fl'), 
+        ('FLTrust', 'fltrust'), 
+        ('FedAvg(有攻击)', 'fedavg')
+    ]:
         if method_key in results and 'times' in results[method_key]:
             time_sec = results[method_key]['times'][0]
             time_min = time_sec / 60
@@ -309,16 +348,35 @@ def create_detailed_accuracy_sheet(wb, results):
     ws['A1'].font = Font(size=14, bold=True)
     ws.merge_cells('A1:G1')
     
-    # TEE-FL数据
-    ws['A3'] = 'TEE-FL'
-    ws['A3'].font = Font(bold=True, size=12)
-    ws['A3'].fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
-    
     headers = ['轮次', '准确率(%)', '损失']
-    for col, header in enumerate(headers, 1):
-        ws.cell(4, col, header).font = Font(bold=True)
+    row = 3
     
-    row = 5
+    # FedAvg-Clean数据（无攻击baseline）
+    if 'fedavg_clean' in results:
+        ws.cell(row, 1, 'FedAvg-Clean (无攻击-Baseline)').font = Font(bold=True, size=12)
+        ws.cell(row, 1).fill = PatternFill(start_color="E7E6E6", end_color="E7E6E6", fill_type="solid")
+        
+        row += 1
+        for col, header in enumerate(headers, 1):
+            ws.cell(row, col, header).font = Font(bold=True)
+        
+        row += 1
+        for item in results['fedavg_clean']['accuracies']:
+            ws.cell(row, 1, item['epoch'])
+            ws.cell(row, 2, item['accuracy'])
+            ws.cell(row, 3, item['loss'])
+            row += 1
+        row += 1
+    
+    # TEE-FL数据
+    ws.cell(row, 1, 'TEE-FL').font = Font(bold=True, size=12)
+    ws.cell(row, 1).fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    
+    row += 1
+    for col, header in enumerate(headers, 1):
+        ws.cell(row, col, header).font = Font(bold=True)
+    
+    row += 1
     for item in results['tee_fl']['accuracies']:
         ws.cell(row, 1, item['epoch'])
         ws.cell(row, 2, item['accuracy'])
