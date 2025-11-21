@@ -686,8 +686,8 @@ def test_independent_detectors(args, dataset_train, dataset_test, dict_users, at
                     # PoisonedFL模型投毒：使用专用阈值
                     # 原理：模型投毒更隐蔽（多轮一致性优化），需要比数据投毒更宽松的阈值
                     # ⚠️ 观察模式不改变阈值，只改变聚合决策
-                    direction_threshold = 0.15  # PoisonedFL专用阈值（统一使用）
-                                               # 介于label_flipping(0.1)和noise_injection(0.24)之间
+                    direction_threshold = 0.07  # PoisonedFL专用阈值（CIFAR-10优化）
+                                               # 更严格的阈值以应对修复后的强攻击
                     
                     direction_anomaly = (direction_sim is not None and direction_sim < direction_threshold)
                     detected_as_malicious = direction_anomaly

@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from tqdm import tqdm
+import pandas as pd  # 用于导出Excel
 
 # 添加路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -113,6 +114,11 @@ class LocalUpdate:
                     loss += (self.args.prox_alpha / 2) * proximal_term
                 
                 loss.backward()
+                
+                # 梯度裁剪：防止梯度爆炸导致NaN（在攻击场景下必需）
+                # max_norm=10.0适合ResNet+CIFAR-10，既防止爆炸又不过度抑制训练
+                torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=10.0)
+                
                 optimizer.step()
                 
                 batch_loss.append(loss.item())
@@ -203,6 +209,10 @@ class LocalUpdate:
                     loss += (self.args.prox_alpha / 2) * proximal_term
                 
                 loss.backward()
+                
+                # 梯度裁剪：防止梯度爆炸
+                torch.nn.utils.clip_grad_norm_(tee_model.parameters(), max_norm=10.0)
+                
                 optimizer.step()
         
         return tee_model.state_dict()
@@ -248,7 +258,7 @@ class DefenseComparison:
             'attack_params': {
                 'args': args,
                 'device': self.device,
-                'attack_strength': 5.0,  # PoisonedFL攻击强度（强攻击场景）
+                'attack_strength': 8.0,  # PoisonedFL: c^t因子（论文默认c_0=8），λ^t = c^t × ||Δw^{t-1}||动态调整
                 'consistency_weight': 0.5,
                 'num_classes': 10,
             }
@@ -265,7 +275,7 @@ class DefenseComparison:
         # 实验结果存储
         self.results = {
             'fedavg_clean': {'accuracies': [], 'times': []},  # 新增：无攻击baseline
-            'tee_fl': {'accuracies': [], 'times': [], 'detection_stats': []},
+            'tee_fl': {'accuracies': [], 'times': [], 'detection_stats': [], 'client_details': []},  # 新增client_details
             'fltrust': {'accuracies': [], 'times': [], 'trust_scores': []},
             'fedavg': {'accuracies': [], 'times': []},
             'config': vars(args)
@@ -279,7 +289,7 @@ class DefenseComparison:
         print(f"📊 恶意客户端比例: {args.malicious_ratio}")
         print(f"📊 攻击类型: {args.attack_type}")
         print(f"📊 训练轮数: {args.epochs}")
-        print(f"📊 Warmup轮数: 3 (前3轮无攻击)")
+        print(f"📊 TEE-FL Warmup轮数: 3 (前3轮不检测，但仍有攻击)")
         print(f"📊 数据分布: {'IID' if args.iid else f'Non-IID (case={args.noniid_case}, beta={args.data_beta})'}")
         if not args.iid:
             print(f"📊 FedProx正则化: μ={args.prox_alpha} (用于Non-IID收敛)")
@@ -531,6 +541,7 @@ class DefenseComparison:
             local_weights = []
             accepted_weights = []
             accepted_idx_list = []  # 记录通过检测的客户端ID
+            epoch_client_details = []  # 保存本轮所有客户端的详细检测信息
             m = max(int(self.args.frac * self.args.num_users), 1)
             idxs_users = np.random.choice(range(self.args.num_users), m, replace=False)
             
@@ -605,10 +616,20 @@ class DefenseComparison:
                 if is_malicious:
                     detection_stats['true_malicious'] += 1
                 
-                # 调试输出
+                # 保存和输出检测详情
                 if epoch < warmup_epochs:
                     # Warmup期输出
                     print(f"    [Warmup] 客户端{idx}: 跳过检测，直接接受")
+                    # Warmup期也保存数据（余弦相似度为None）
+                    epoch_client_details.append({
+                        'epoch': epoch + 1,
+                        'client_id': int(idx),
+                        'is_malicious': bool(is_malicious),
+                        'cosine_similarity': None,
+                        'detected_as_malicious': False,
+                        'accepted': True,
+                        'phase': 'warmup'
+                    })
                 else:
                     # 攻击期输出所有检测详情
                     features = detection_result.get('features', {})
@@ -616,6 +637,17 @@ class DefenseComparison:
                     print(f"    [检测] 客户端{idx}: 余弦相似度={cos_sim:.4f}, "
                           f"检测={'恶意' if is_detected_malicious else '良性'}, "
                           f"实际={'恶意' if is_malicious else '良性'}")
+                    
+                    # 保存详细检测信息
+                    epoch_client_details.append({
+                        'epoch': epoch + 1,
+                        'client_id': int(idx),
+                        'is_malicious': bool(is_malicious),
+                        'cosine_similarity': float(cos_sim),
+                        'detected_as_malicious': bool(is_detected_malicious),
+                        'accepted': not is_detected_malicious,
+                        'phase': 'attack'
+                    })
                 
                 if is_detected_malicious:
                     detection_stats['detected_malicious'] += 1
@@ -638,6 +670,9 @@ class DefenseComparison:
                 global_model.load_state_dict(global_weights)
             else:
                 print(f"⚠️ Epoch {epoch+1}: 所有客户端都被检测为恶意，保持全局模型不变")
+            
+            # 保存本轮的客户端详细信息
+            self.results['tee_fl']['client_details'].extend(epoch_client_details)
             
             # 测试
             if (epoch + 1) % self.args.test_freq == 0 or epoch == self.args.epochs - 1:
@@ -930,6 +965,59 @@ class DefenseComparison:
             json.dump(serializable_results, f, indent=2, ensure_ascii=False)
         
         print(f"\n💾 实验结果已保存到: {filepath}")
+        
+        # 导出TEE-FL客户端详细信息到Excel
+        if len(self.results['tee_fl']['client_details']) > 0:
+            excel_filename = f"tee_fl_details_{self.args.attack_type}_mr{int(self.args.malicious_ratio*100)}_{timestamp}.xlsx"
+            excel_filepath = results_dir / excel_filename
+            
+            # 创建DataFrame
+            df = pd.DataFrame(self.results['tee_fl']['client_details'])
+            
+            # 添加额外的列（方便分析）
+            df['correct_detection'] = (df['is_malicious'] == df['detected_as_malicious'])
+            
+            # 重命名列（更易读）
+            df = df.rename(columns={
+                'epoch': '轮次',
+                'client_id': '客户端ID',
+                'is_malicious': '实际是否恶意',
+                'cosine_similarity': '余弦相似度',
+                'detected_as_malicious': '检测为恶意',
+                'accepted': '是否被接受',
+                'phase': '阶段',
+                'correct_detection': '检测正确'
+            })
+            
+            # 导出到Excel
+            with pd.ExcelWriter(excel_filepath, engine='openpyxl') as writer:
+                # Sheet 1: 所有详细数据
+                df.to_excel(writer, sheet_name='客户端详细信息', index=False)
+                
+                # Sheet 2: 按轮次汇总统计
+                if '轮次' in df.columns and '实际是否恶意' in df.columns:
+                    summary_by_epoch = df.groupby('轮次').agg({
+                        '客户端ID': 'count',
+                        '实际是否恶意': 'sum',
+                        '检测为恶意': 'sum',
+                        '检测正确': 'sum',
+                        '余弦相似度': lambda x: x.dropna().mean() if len(x.dropna()) > 0 else None
+                    }).rename(columns={
+                        '客户端ID': '总客户端数',
+                        '实际是否恶意': '实际恶意数',
+                        '检测为恶意': '检测为恶意数',
+                        '检测正确': '检测正确数',
+                        '余弦相似度': '平均余弦相似度'
+                    })
+                    summary_by_epoch['检测准确率'] = (summary_by_epoch['检测正确数'] / summary_by_epoch['总客户端数'] * 100).round(2)
+                    summary_by_epoch.to_excel(writer, sheet_name='按轮次汇总')
+                
+                # Sheet 3: 准确率曲线
+                if len(self.results['tee_fl']['accuracies']) > 0:
+                    acc_df = pd.DataFrame(self.results['tee_fl']['accuracies'])
+                    acc_df.to_excel(writer, sheet_name='准确率曲线', index=False)
+            
+            print(f"📊 TEE-FL详细信息已导出到Excel: {excel_filepath}")
 
 
 def main():

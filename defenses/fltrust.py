@@ -157,6 +157,10 @@ class FLTrust:
                 
                 loss = criterion(output, target)
                 loss.backward()
+                
+                # 梯度裁剪：防止梯度爆炸（在攻击场景下必需）
+                torch.nn.utils.clip_grad_norm_(global_model.parameters(), max_norm=10.0)
+                
                 optimizer.step()
                 
                 steps += 1

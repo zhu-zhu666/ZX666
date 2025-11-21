@@ -660,7 +660,14 @@ class IndependentDetectorsTester:
         
         # 根据攻击类型设置阈值
         is_noise_attack = (attack_scenario == 'noise_injection')
-        direction_threshold = 0.24 if is_noise_attack else 0.15  # Non-IID环境优化阈值（PoisonedFL）
+        is_poisonedfl = (attack_scenario == 'poisonedfl')
+        
+        if is_noise_attack:
+            direction_threshold = 0.24  # 噪声攻击阈值
+        elif is_poisonedfl:
+            direction_threshold = 0.07  # PoisonedFL专用阈值（CIFAR-10优化，应对强攻击）
+        else:
+            direction_threshold = 0.15  # 其他攻击默认阈值
         
         # 1. 更新方向检测（必选）
         try:
